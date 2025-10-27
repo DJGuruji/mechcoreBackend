@@ -486,7 +486,7 @@ httpServer.listen(PORT, () => {
   console.log(`
 ╔════════════════════════════════════════════════════════════════╗
 ║                                                                ║
-║   🚀 WebSocket Relay Server Running                           ║
+║    WebSocket Relay Server Running                           ║
 ║                                                                ║
 ║   Port: ${PORT}                                                    ║
 ║   Environment: ${process.env.NODE_ENV || 'development'}                                   ║
