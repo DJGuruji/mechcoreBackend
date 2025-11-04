@@ -124,7 +124,6 @@ app.get('/', (req, res) => {
   // Only expose detailed stats in development
   if (process.env.NODE_ENV !== 'production') {
     response.activeSessions = activeSessions.size;
-    response.pendingRequests = pendingRequests.size;
     response.uptime = process.uptime();
   }
   
@@ -369,14 +368,6 @@ io.on('connection', (socket) => {
     // Clean up session
     activeSessions.delete(sessionId);
     
-    // Reject all pending requests for this session
-    pendingRequests.forEach((pending, requestId) => {
-      if (pending.sessionId === sessionId) {
-        clearTimeout(pending.timeout);
-        pending.reject({ error: true, message: 'WebSocket connection closed' });
-        pendingRequests.delete(requestId);
-      }
-    });
   });
 
   // Handle errors
@@ -399,13 +390,6 @@ const cleanupInterval = setInterval(() => {
       console.log(`[WebSocket] Cleaning up inactive session: ${sessionId}`);
       activeSessions.delete(sessionId);
       
-      // Clean up pending requests for this session
-      pendingRequests.forEach((pending, requestId) => {
-        if (pending.sessionId === sessionId) {
-          clearTimeout(pending.timeout);
-          pendingRequests.delete(requestId);
-        }
-      });
     }
   });
   
