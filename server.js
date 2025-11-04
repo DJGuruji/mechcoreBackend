@@ -489,17 +489,12 @@ httpServer.listen(PORT, () => {
   console.log(`
 ╔════════════════════════════════════════════════════════════════╗
 ║                                                                ║
-║    WebSocket Relay Server Running                           ║
+║    WebSocket Relay Server Running                              ║
 ║                                                                ║
-║   Port: ${PORT}                                                    ║
-║   Environment: ${process.env.NODE_ENV || 'development'}                                   ║
-║   Allowed Origins: ${allowedOrigins.length} configured                       ║
-║                                                                ║
-║   Endpoints:                                                   ║
-║   • Health Check: GET /                                        ║
-║   • Statistics: GET /stats                                     ║
-║   • WebSocket: ws://localhost:${PORT}/socket.io                   ║
-║                                                                ║
+║   Port: ${PORT}                                                ║
+║   Environment: ${process.env.NODE_ENV || 'development'}        ║                           ║
+║   Allowed Origins: ${allowedOrigins.length} configured         ║
+║                                                                ║    
 ╚════════════════════════════════════════════════════════════════╝
   `);
 });
