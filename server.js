@@ -105,7 +105,7 @@ const io = new Server(httpServer, {
 const activeSessions = new Map();
 
 // Store pending requests (waiting for browser to execute)
-// const pendingRequests = new Map();
+const pendingRequests = new Map();
 
 // Rate limiting for WebSocket connections
 const connectionAttempts = new Map();
@@ -124,6 +124,7 @@ app.get('/', (req, res) => {
   // Only expose detailed stats in development
   if (process.env.NODE_ENV !== 'production') {
     response.activeSessions = activeSessions.size;
+    response.pendingRequests = pendingRequests.size;
     response.uptime = process.uptime();
   }
   
@@ -144,6 +145,7 @@ app.get('/stats', (req, res) => {
     success: true,
     stats: {
       activeSessions: activeSessions.size,
+      pendingRequests: pendingRequests.size,
       sessions: Array.from(activeSessions.values()).map(s => ({
         sessionId: s.sessionId,
         userId: s.userId,
@@ -281,11 +283,29 @@ io.on('connection', (socket) => {
     }
 
     try {
-      // Execute the request directly on the server side to bypass CORS
-      const response = await executeLocalhostRequest(request);
-      
-      // Send the response back to the client
+      // Create promise to wait for browser response with timeout
+      const responsePromise = new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => {
+          pendingRequests.delete(request.requestId);
+          reject({ error: true, message: 'Request timeout - browser did not respond' });
+        }, parseInt(process.env.REQUEST_TIMEOUT_SECONDS || '30') * 1000);
+
+        pendingRequests.set(request.requestId, {
+          requestData: request,
+          resolve,
+          reject,
+          timeout,
+          sessionId
+        });
+      });
+
+      // Send command to browser to execute local fetch
+      socket.emit('localhost:performFetch', request);
+
+      // Wait for browser response
+      const response = await responsePromise;
       callback(response);
+
     } catch (error) {
       console.error('[WebSocket] Request execution error:', error);
       callback({ 
@@ -295,71 +315,49 @@ io.on('connection', (socket) => {
     }
   });
 
-  // New function to execute localhost requests directly on the server
-  async function executeLocalhostRequest(request) {
-    const { url, method, headers, body } = request;
-    
-    console.log(`[WebSocket] Executing localhost request directly on server: ${method} ${url}`);
-    
-    try {
-      // Prepare fetch options
-      const fetchOptions = {
-        method: method || 'GET',
-        headers: headers || {},
-      };
-
-      // Add body for non-GET requests
-      if (method !== 'GET' && method !== 'HEAD' && body) {
-        fetchOptions.body = typeof body === 'string' 
-          ? body 
-          : JSON.stringify(body);
-      }
-
-      // Execute fetch from server-side (bypasses CORS!)
-      const startTime = Date.now();
-      const response = await fetch(url, fetchOptions);
-      const endTime = Date.now();
-
-      // Read response
-      const contentType = response.headers.get('content-type') || '';
-      let responseBody;
-
-      try {
-        const text = await response.text();
-        if (contentType.includes('application/json')) {
-          responseBody = JSON.parse(text);
-        } else {
-          responseBody = text;
-        }
-      } catch (e) {
-        responseBody = await response.text();
-      }
-
-      // Convert headers to object
-      const responseHeaders = {};
-      response.headers.forEach((value, key) => {
-        responseHeaders[key] = value;
-      });
-
-      // Calculate response size
-      const responseSize = new Blob([
-        typeof responseBody === 'string' ? responseBody : JSON.stringify(responseBody)
-      ]).size;
-
-      // Return response
-      return {
-        status: response.status,
-        statusText: response.statusText,
-        headers: responseHeaders,
-        body: responseBody,
-        time: endTime - startTime,
-        size: responseSize,
-      };
-    } catch (error) {
-      console.error('[WebSocket] Server-side localhost request failed:', error);
-      throw new Error(`Server-side request failed: ${error.message || 'Unknown error'}`);
+  // Handle response from browser (after local fetch) with validation
+  socket.on('localhost:fetchComplete', (response) => {
+    // Validate response structure
+    if (!response || typeof response !== 'object') {
+      return;
     }
-  }
+    
+    console.log(`[WebSocket] Received browser response for request: ${response.requestId}`);
+    
+    const pending = pendingRequests.get(response.requestId);
+    if (pending) {
+      // Verify this response is from the correct session
+      if (pending.sessionId !== sessionId) {
+        return;
+      }
+      
+      clearTimeout(pending.timeout);
+      pending.resolve(response);
+      pendingRequests.delete(response.requestId);
+    }
+  });
+
+  // Handle fetch error from browser with validation
+  socket.on('localhost:fetchError', (data) => {
+    // Validate data structure
+    if (!data || typeof data !== 'object' || !data.requestId) {
+      return;
+    }
+    
+    console.error(`[WebSocket] Browser fetch error: ${data.error}`);
+    
+    const pending = pendingRequests.get(data.requestId);
+    if (pending) {
+      // Verify this error is from the correct session
+      if (pending.sessionId !== sessionId) {
+        return;
+      }
+      
+      clearTimeout(pending.timeout);
+      pending.reject({ error: true, message: data.error });
+      pendingRequests.delete(data.requestId);
+    }
+  });
 
   // Handle disconnection
   socket.on('disconnect', (reason) => {
@@ -368,6 +366,14 @@ io.on('connection', (socket) => {
     // Clean up session
     activeSessions.delete(sessionId);
     
+    // Reject all pending requests for this session
+    pendingRequests.forEach((pending, requestId) => {
+      if (pending.sessionId === sessionId) {
+        clearTimeout(pending.timeout);
+        pending.reject({ error: true, message: 'WebSocket connection closed' });
+        pendingRequests.delete(requestId);
+      }
+    });
   });
 
   // Handle errors
@@ -390,6 +396,13 @@ const cleanupInterval = setInterval(() => {
       console.log(`[WebSocket] Cleaning up inactive session: ${sessionId}`);
       activeSessions.delete(sessionId);
       
+      // Clean up pending requests for this session
+      pendingRequests.forEach((pending, requestId) => {
+        if (pending.sessionId === sessionId) {
+          clearTimeout(pending.timeout);
+          pendingRequests.delete(requestId);
+        }
+      });
     }
   });
   
@@ -473,12 +486,17 @@ httpServer.listen(PORT, () => {
   console.log(`
 ╔════════════════════════════════════════════════════════════════╗
 ║                                                                ║
-║    WebSocket Relay Server Running                              ║
+║    WebSocket Relay Server Running                           ║
 ║                                                                ║
-║   Port: ${PORT}                                                ║
-║   Environment: ${process.env.NODE_ENV || 'development'}        ║                           ║
-║   Allowed Origins: ${allowedOrigins.length} configured         ║
-║                                                                ║    
+║   Port: ${PORT}                                                    ║
+║   Environment: ${process.env.NODE_ENV || 'development'}                                   ║
+║   Allowed Origins: ${allowedOrigins.length} configured                       ║
+║                                                                ║
+║   Endpoints:                                                   ║
+║   • Health Check: GET /                                        ║
+║   • Statistics: GET /stats                                     ║
+║   • WebSocket: ws://localhost:${PORT}/socket.io                   ║
+║                                                                ║
 ╚════════════════════════════════════════════════════════════════╝
   `);
 });
