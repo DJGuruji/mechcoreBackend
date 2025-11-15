@@ -1,35 +1,35 @@
 const redis = require('redis');
 require('dotenv').config();
 
+// Debug: Log environment variables
+console.log('Environment variables loaded:', {
+  REDIS_HOST: process.env.REDIS_HOST,
+  REDIS_PORT: process.env.REDIS_PORT,
+  REDIS_PASSWORD: process.env.REDIS_PASSWORD ? '****' : 'not set'
+});
+
 // Create Redis client
 const createRedisClient = () => {
+  // Debug: Log the Redis configuration
+  console.log('Redis Configuration:', {
+    host: process.env.REDIS_HOST,
+    port: process.env.REDIS_PORT,
+    password: process.env.REDIS_PASSWORD ? '****' : 'not set'
+  });
+  
   const redisOptions = {
-    host: process.env.REDIS_HOST || 'localhost',
-    port: process.env.REDIS_PORT || 6379,
+    socket: {
+      host: process.env.REDIS_HOST || 'localhost',
+      port: process.env.REDIS_PORT || 6379,
+    },
     // Add password if provided
     ...(process.env.REDIS_PASSWORD && { password: process.env.REDIS_PASSWORD }),
     // Add other options as needed
-    retry_strategy: (options) => {
-      if (options.error && options.error.code === 'ECONNREFUSED') {
-        console.error('Redis server connection refused');
-        // Try to reconnect after 5 seconds
-        return 5000;
-      }
-      if (options.total_retry_time > 1000 * 60 * 60) {
-        // End reconnecting after a specific timeout and flush all commands with an individual error
-        return new Error('Retry time exhausted');
-      }
-      if (options.attempt > 10) {
-        // End reconnecting with built in error
-        return undefined;
-      }
-      // Reconnect after a delay
-      return Math.min(options.attempt * 100, 3000);
-    }
   };
 
   const client = redis.createClient(redisOptions);
   
+  // Handle reconnect logic with new event system
   client.on('error', (err) => {
     console.error('Redis Client Error:', err);
   });
@@ -55,6 +55,7 @@ const redisClient = createRedisClient();
 // Connect to Redis
 const connectRedis = async () => {
   try {
+    console.log('Attempting to connect to Redis...');
     await redisClient.connect();
     console.log('Connected to Redis');
   } catch (error) {
