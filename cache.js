@@ -1,22 +1,9 @@
 const redis = require('redis');
 require('dotenv').config();
 
-// Debug: Log environment variables
-console.log('Environment variables loaded:', {
-  REDIS_HOST: process.env.REDIS_HOST,
-  REDIS_PORT: process.env.REDIS_PORT,
-  REDIS_PASSWORD: process.env.REDIS_PASSWORD ? '****' : 'not set'
-});
-
 // Create Redis client
 const createRedisClient = () => {
-  // Debug: Log the Redis configuration
-  console.log('Redis Configuration:', {
-    host: process.env.REDIS_HOST,
-    port: process.env.REDIS_PORT,
-    password: process.env.REDIS_PASSWORD ? '****' : 'not set'
-  });
-  
+
   const redisOptions = {
     socket: {
       host: process.env.REDIS_HOST || 'localhost',
@@ -55,7 +42,6 @@ const redisClient = createRedisClient();
 // Connect to Redis
 const connectRedis = async () => {
   try {
-    console.log('Attempting to connect to Redis...');
     await redisClient.connect();
     console.log('Connected to Redis');
   } catch (error) {
