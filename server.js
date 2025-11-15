@@ -23,6 +23,9 @@ const { Server } = require('socket.io');
 const cors = require('cors');
 require('dotenv').config();
 
+// Redis cache
+const { cache, connectRedis } = require('./cache');
+
 const app = express();
 const httpServer = createServer(app);
 
@@ -61,6 +64,10 @@ app.use((req, res, next) => {
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
   next();
 });
+
+// Cache routes
+const cacheRoutes = require('./routes/cache');
+app.use('/api/cache', cacheRoutes);
 
 // Rate limiting middleware
 const rateLimit = require('express-rate-limit');
@@ -482,8 +489,11 @@ process.on('unhandledRejection', (reason, promise) => {
 
 // Start server
 const PORT = process.env.PORT || 8080;
-httpServer.listen(PORT, () => {
-  console.log(`
+
+// Connect to Redis before starting server
+connectRedis().then(() => {
+  httpServer.listen(PORT, () => {
+    console.log(`
 ╔════════════════════════════════════════════════════════════════╗
 ║                                                                ║
 ║    WebSocket Relay Server Running                           ║
@@ -499,4 +509,25 @@ httpServer.listen(PORT, () => {
 ║                                                                ║
 ╚════════════════════════════════════════════════════════════════╝
   `);
+  });
+}).catch((error) => {
+  console.error('Failed to connect to Redis, starting server anyway:', error);
+  httpServer.listen(PORT, () => {
+    console.log(`
+╔════════════════════════════════════════════════════════════════╗
+║                                                                ║
+║    WebSocket Relay Server Running (No Redis)                ║
+║                                                                ║
+║   Port: ${PORT}                                                    ║
+║   Environment: ${process.env.NODE_ENV || 'development'}                                   ║
+║   Allowed Origins: ${allowedOrigins.length} configured                       ║
+║                                                                ║
+║   Endpoints:                                                   ║
+║   • Health Check: GET /                                        ║
+║   • Statistics: GET /stats                                     ║
+║   • WebSocket: ws://localhost:${PORT}/socket.io                   ║
+║                                                                ║
+╚════════════════════════════════════════════════════════════════╝
+  `);
+  });
 });
