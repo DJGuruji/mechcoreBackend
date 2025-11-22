@@ -200,6 +200,9 @@ io.use((socket, next) => {
   next();
 });
 
+// Store CORS configuration for localhost requests
+const localhostCorsConfig = new Map();
+
 // WebSocket connection handling
 io.on('connection', (socket) => {
   console.log(`[WebSocket] Client connected:`);
@@ -306,8 +309,22 @@ io.on('connection', (socket) => {
         });
       });
 
+      // Zero-configuration enhancement: Add CORS headers for localhost requests
+      // This allows users to test localhost APIs without manually configuring CORS
+      const enhancedRequest = {
+        ...request,
+        headers: {
+          ...request.headers,
+          // Add CORS bypass headers
+          'Access-Control-Allow-Origin': '*',
+          'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, PATCH, HEAD, OPTIONS',
+          'Access-Control-Allow-Headers': '*',
+          'Access-Control-Allow-Credentials': 'true'
+        }
+      };
+
       // Send command to browser to execute local fetch
-      socket.emit('localhost:performFetch', request);
+      socket.emit('localhost:performFetch', enhancedRequest);
 
       // Wait for browser response
       const response = await responsePromise;
